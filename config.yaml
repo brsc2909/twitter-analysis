@@ -1,0 +1,5 @@
+bearer_token: xxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+sentiment_models:
+  en: "distilbert-base-uncased-finetuned-sst-2-english"
+  ar: "CAMeL-Lab/bert-base-arabic-camelbert-da-sentiment"
