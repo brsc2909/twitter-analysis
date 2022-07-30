@@ -165,7 +165,7 @@ def parse_tweet(tweet: dict, places: dict) -> dict:
     # get the number of photos and videos from the urls
     r = re.compile(r"^https://twitter.com/\w{1,15}/.*/(video|photo)/1")
 
-    def photo_video(a, b: Match[str]):
+    def photo_video(a, b: Match):
         photos, videos = a
         if b:
             g = b.group(1)
