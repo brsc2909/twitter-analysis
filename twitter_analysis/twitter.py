@@ -1,10 +1,60 @@
+import re
 from datetime import datetime, timedelta
 from enum import Enum
-from time import sleep, time
-from typing import Iterator, Tuple
+from functools import reduce
+from typing import Iterable
 
-import requests
-from pyrate_limiter import BucketFullException, Duration, Limiter, RequestRate
+from regex import Match
+from twarc.client2 import Twarc2
+
+TWEET_FIELDS = [
+    "attachments",
+    "author_id",
+    "conversation_id",
+    "created_at",
+    "entities",
+    "geo",
+    "id",
+    "in_reply_to_user_id",
+    "lang",
+    "public_metrics",
+    "possibly_sensitive",
+    "referenced_tweets",
+    "reply_settings",
+    "source",
+    "text",
+    "withheld",
+]
+
+EXPANSIONS = ["author_id", "geo.place_id"]
+
+PLACE_FIELDS = [
+    "contained_within",
+    "country",
+    "country_code",
+    "full_name",
+    "geo",
+    "id",
+    "name",
+    "place_type",
+]
+
+USER_FIELDS = [
+    "created_at",
+    "description",
+    "entities",
+    "id",
+    "location",
+    "name",
+    "pinned_tweet_id",
+    "profile_image_url",
+    "protected",
+    "public_metrics",
+    "url",
+    "username",
+    "verified",
+    "withheld",
+]
 
 
 class SearchMethod(Enum):
@@ -12,94 +62,37 @@ class SearchMethod(Enum):
     RECENT = "recent"
 
 
-rate_limits = (
-    RequestRate(1, Duration.SECOND),
-    RequestRate(300, Duration.HOUR / 4),
-)
-
-limiter = Limiter(*rate_limits)
-
-
-class TwitterApiV2:
-    """Twitter API V2"""
-
-    FIFTEEN_MINUTES: int = 900
-    MAX_REQUESTS: int = 300
-
-    base_url: str = "https://api.twitter.com/2"
-
-    user_fields: list[str] = [
-        "created_at",
-        "description",
-        "entities",
-        "id",
-        "location",
-        "name",
-        "pinned_tweet_id",
-        "profile_image_url",
-        "protected",
-        "public_metrics",
-        "url",
-        "username",
-        "verified",
-        "withheld",
-    ]
-    place_fields: list[str] = [
-        "contained_within",
-        "country",
-        "country_code",
-        "full_name",
-        "geo",
-        "id",
-        "name",
-        "place_type",
-    ]
-
-    tweet_fields: list[str] = [
-        "attachments",
-        "author_id",
-        "context_annotations",
-        "conversation_id",
-        "created_at",
-        "entities",
-        "geo",
-        "id",
-        "in_reply_to_user_id",
-        "lang",
-        "public_metrics",
-        "possibly_sensitive",
-        "referenced_tweets",
-        "reply_settings",
-        "source",
-        "text",
-        "withheld",
-    ]
-
-    tweet_expansions: list[str] = ["author_id", "geo.place_id"]
+class TwitterApiV2(Twarc2):
+    """Twitter API V2. based on twarc"""
 
     def __init__(self, token) -> None:
-        self.headers = self.headers = {"Authorization": f"Bearer {token}"}
+        super().__init__(bearer_token=token)
 
-    @limiter.ratelimit("identity")
-    def _make_api_call(self, url: str, url_params: dict) -> dict:
-        """Request data from api endpoint with headers
-        :param url: string of the url endpoint to make request from
-        :return: response data from api
-        """
-        response = requests.get(url, url_params, headers=self.headers)
+    def tweet_lookup(self, tweet_ids: list) -> Iterable:
+        results = super().tweet_lookup(
+            tweet_ids,
+            tweet_fields=",".join(TWEET_FIELDS),
+            place_fields=",".join(PLACE_FIELDS),
+            user_fields=",".join(USER_FIELDS),
+            expansions=",".join(EXPANSIONS),
+        )
+        # yield results page by page
+        for page in results:
+            tweets = page["data"]
+            users = page["includes"]["users"]
+            places = {
+                place["id"]: place["full_name"]
+                for place in page["includes"].get("places", [])
+            }
 
-        output = response.json()
-        if response.status_code == 200:
-            return output
-        elif response.status_code == 429:
-            raise BucketFullException(
-                "identity", RequestRate(300, Duration.HOUR / 4), Duration.HOUR / 4
-            )
-        else:
-            raise Exception(output)
+            yield tweets, users, places
 
-    def get_account_info(self, user_id: str):
-        pass
+    def user_lookup(self, users, usernames=False):
+        return super().user_lookup(
+            users,
+            usernames,
+            user_fields=",".join(USER_FIELDS),
+        )
 
     def search(
         self,
@@ -108,77 +101,50 @@ class TwitterApiV2:
         end: datetime = datetime.now() - timedelta(days=1),
         limit: int = None,
         method: SearchMethod = SearchMethod.ALL,
-    ) -> Tuple[Iterator[dict], Iterator[dict]]:
-        """Search twitter feed
-        :param query: twitter search query
-        """
+    ):
+        # Max results per page is 500 with academic key or 100 with regular
+        max_batch = 500 if method == SearchMethod.ALL else 100
 
-        url = f"{self.base_url}/tweets/search/{method.value}"
-        payload = {
-            "query": query,
-            "tweet.fields": ",".join(self.tweet_fields),
-            "user.fields": ",".join(self.user_fields),
-            "place.fields": ",".join(self.place_fields),
-            "max_results": 100 if not limit or limit > 100 else limit,
-            "expansions": ",".join(self.tweet_expansions),
-        }
-        if start:
-            payload["start_time"] = (start.isoformat() + "Z",)
-        if end:
-            payload["end_time"] = (end.isoformat() + "Z",)
+        search_results = self.search_all(
+            query=query,
+            start_time=start,
+            end_time=end,
+            max_results=max_batch if not limit or limit > max_batch else limit,
+            tweet_fields=",".join(TWEET_FIELDS),
+            place_fields=",".join(PLACE_FIELDS),
+            user_fields=",".join(USER_FIELDS),
+            expansions=",".join(EXPANSIONS),
+        )
 
-        try:
-            results = self._make_api_call(url, payload)
-        except BucketFullException as e:
-            print(f"sleeping for {e.meta_info['remaining_time']} seconds")
-            sleep(e.meta_info["remaining_time"] + 1)
-            results = self._make_api_call(url, payload)
-
-        tweet_count = 0
-        tweets = results["data"]
-        users = results["includes"]["users"]
-        places = {
-            place["id"]: place["full_name"]
-            for place in results["includes"].get("places", [])
-        }
-        tweet_count += len(tweets)
-
-        yield tweets, users, places
-
-        while results["meta"].get("next_token", False):
-            if limit and limit < tweet_count:
-                break
-
-            payload["next_token"] = results["meta"].get("next_token", False)
-            t = time()
-            try:
-                results = self._make_api_call(url, payload)
-            except BucketFullException as e:
-                print(f"sleeping for {e.meta_info['remaining_time']} seconds")
-                sleep(e.meta_info["remaining_time"] + 1)
-
-            tweets = results["data"]
-            users = results["includes"]["users"]
+        # yield results page by page
+        for page in search_results:
+            tweets = page["data"]
+            users = page["includes"]["users"]
             places = {
                 place["id"]: place["full_name"]
-                for place in results["includes"].get("places", [])
+                for place in page["includes"].get("places", [])
             }
-            tweet_count += len(tweets)
-            yield tweets, users, places
-            # if request takes less than 1 second wait for remainder
-            if time() - t < 1:
-                sleep(1 - (time() - t))
 
-    def search_replies(
-        self, converation_id: int
-    ) -> Tuple[Iterator[dict], Iterator[dict]]:
+            yield tweets, users, places
+
+    def search_replies(self, conversation_id: int):
         return self.search(
-            query=f"conversation_id:{converation_id} is:reply", start=None, end=None
+            query=f"conversation_id:{str(conversation_id)} is:reply",
+            start=None,
+            end=None,
         )
 
 
-def parse_tweet(tweet: dict, places: dict) -> Tuple:
-    """id,author,url,tweet_text,timestamp,hashtags,media,urls,location,likes,replies,retweets,quotes"""
+def parse_tweet(tweet: dict, places: dict) -> dict:
+    """parse tweet object into database format
+
+    Args:
+        tweet (dict): tweet object fromt the twitter api
+        places (dict): list of places from the twitter api
+
+    Returns:
+        dict: Custom tweet object
+    """
     hashtags = []
     mentions = []
     urls = []
@@ -195,10 +161,22 @@ def parse_tweet(tweet: dict, places: dict) -> Tuple:
 
     if "geo" in tweet:
         location = places.get(tweet["geo"]["place_id"])
-    media = []
-    for item in tweet.get("media", []):
-        media_link = item.get("url", None) or item.get("preview_image_url", None)
-        media.append(media_link)
+
+    # get the number of photos and videos from the urls
+    r = re.compile(r"^https://twitter.com/\w{1,15}/.*/(video|photo)/1")
+
+    def photo_video(a, b: Match[str]):
+        photos, videos = a
+        if b:
+            g = b.group(1)
+            return (
+                photos + 1 if g == "photo" else photos,
+                videos + 1 if g == "video" else videos,
+            )
+        else:
+            return a
+
+    images, videos = reduce(photo_video, [r.search(u) for u in urls], (0, 0))
 
     referenced_tweet = (
         [
@@ -208,6 +186,7 @@ def parse_tweet(tweet: dict, places: dict) -> Tuple:
         ]
         or [None]
     )[0]
+
     return {
         "id": tweet["id"],
         "parent_id": referenced_tweet,
@@ -218,22 +197,33 @@ def parse_tweet(tweet: dict, places: dict) -> Tuple:
         "timestamp": tweet["created_at"],
         "hashtags": ",".join(hashtags) or None,
         "mentions": ",".join(mentions) or None,
-        "media": ",".join(media) or None,
+        "videos": videos,
+        "images": images,
         "urls": ",".join(urls),
         "location": location,
         "likes": public_metrics.get("like_count", 0),
         "replies": public_metrics.get("reply_count", 0),
         "retweets": public_metrics.get("retweet_count", 0),
         "quotes": public_metrics.get("quote_count", 0),
+        "sentiment": None,
+        "sentiment_score": None,
     }
 
 
-def parse_user(user: dict):
-    """id, username, verified, location, following, followers, date_joined"""
+def parse_user(user: dict) -> dict:
+    """parse user object into database format
+
+    Args:
+        tweet (dict): user object from the twitter api
+
+    Returns:
+        dict: Custom user object
+    """
     public_metrics = user["public_metrics"]
     return {
         "id": user["id"],
         "username": user["username"],
+        "name": user["name"],
         "verified": user["verified"],
         "location": user.get("location"),
         "following": public_metrics["following_count"],

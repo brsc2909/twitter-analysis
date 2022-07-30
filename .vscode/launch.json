@@ -5,19 +5,38 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: Current File",
+      "name": "Python: English dataset",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/twitter_analysis/main.py",
+      "justMyCode": false,
       "args": [
         "--query",
-        "#monkeypox -is:retweet",
+        "#monkeypox OR #MonkeypoxVirus OR #MPX",
         "--lang",
         "en",
-        "--start",
-        "2022-06-01",
-        "--end",
-        "2022-06-07"
+        "-s",
+        "2022-05-01",
+        "-e",
+        "2022-07-09"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: Arabic dataset",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/twitter_analysis/main.py",
+      "justMyCode": false,
+      "args": [
+        "--query",
+        "#جدري_القرود OR #جدري_القردة",
+        "--lang",
+        "ar",
+        "-s",
+        "2022-05-01",
+        "-e",
+        "2022-07-22"
       ],
       "console": "integratedTerminal"
     }
