@@ -24,7 +24,7 @@ def parse_args() -> Tuple:
         "-q",
         "--query",
         dest="query",
-        default=None,
+        required=True,
         help="twitter search query",
     )
     parser.add_argument(
