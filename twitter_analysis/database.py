@@ -209,17 +209,17 @@ class Database:
         cursor.execute(REPLIES_DDL)
         cursor.execute(USERS_DDL)
 
-    def insert_users(self, users: list[Tuple]):
+    def insert_users(self, users: list):
         cursor = self.conn.cursor()
         cursor.executemany(INSERT_USER_DML, users)
         self.conn.commit()
 
-    def insert_tweets(self, tweets: list[Tuple]):
+    def insert_tweets(self, tweets: list):
         cursor = self.conn.cursor()
         cursor.executemany(INSERT_TWEET_DML, tweets)
         self.conn.commit()
 
-    def insert_replies(self, tweet_replies: list[Tuple]):
+    def insert_replies(self, tweet_replies: list):
         cursor = self.conn.cursor()
         cursor.executemany(INSERT_REPLIES_DML, tweet_replies)
         self.conn.commit()
