@@ -62,7 +62,7 @@ def parse_args() -> Tuple:
         "-c",
         "--config",
         dest="config",
-        default=".config.yaml",
+        default="config.yaml",
         help="Path to config file (Default: config.yaml)",
     )
 
