@@ -21,6 +21,8 @@ pip install -e .
 
 ## Setup
 To get started you'll need to add your twitter api key to the config.yaml file. By default this file is located in the root directory of this package. However this can be located anywhere else and references using the `--config PATH` argument.
+
+To support more languages you can add the ISO 3166 country code followed by the sentiment model. You can find models on [Huggin Face](https://huggingface.co/models?pipeline_tag=text-classification&sort=downloads)
 ### config.yaml
 ```yaml
 bearer_token: xxxxxxxxxxxxxxxxxxxxxxxxxxx
